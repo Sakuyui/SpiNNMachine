@@ -204,9 +204,8 @@ def _describe_chip(chip: Chip, standard, ethernet) -> JsonArray:
     if chip.ip_address is not None:
         details['ipAddress'] = chip.ip_address
         # Write the Resources ONLY if different from the e_values
-        if (chip.n_processors - chip.n_user_processors) != ethernet.monitors:
-            exceptions["monitors"] = \
-                chip.n_processors - chip.n_user_processors
+        if (chip.n_scamp_processors) != ethernet.monitors:
+            exceptions["monitors"] = chip.n_scamp_processors
         if router_entries != ethernet.router_entries:
             exceptions["routerEntries"] = router_entries
         if chip.sdram != ethernet.sdram:
@@ -215,9 +214,8 @@ def _describe_chip(chip: Chip, standard, ethernet) -> JsonArray:
             exceptions["tags"] = tags
     else:
         # Write the Resources ONLY if different from the s_values
-        if (chip.n_processors - chip.n_user_processors) != standard.monitors:
-            exceptions["monitors"] = \
-                chip.n_processors - chip.n_user_processors
+        if (chip.n_scamp_processors) != standard.monitors:
+            exceptions["monitors"] = chip.n_scamp_processors
         if router_entries != standard.router_entries:
             exceptions["routerEntries"] = router_entries
         if chip.sdram != standard.sdram:
@@ -238,25 +236,24 @@ def to_json() -> JsonObject:
     :rtype: dict
     """
     machine = MachineDataView.get_machine()
-    # Find the std values for one non-ethernet chip to use as standard
+    # Find the standard values for any non-Ethernet chip to use by default
     std = None
     for chip in machine.chips:
         if chip.ip_address is None:
             std = _Desc(
-                monitors=chip.n_processors - chip.n_user_processors,
+                monitors=chip.n_processors - chip.n_placable_processors,
                 router_entries=_int_value(
                     chip.router.n_available_multicast_entries),
                 sdram=chip.sdram,
                 tags=list(chip.tag_ids))
             break
     else:
-        # Probably ought to warn if std is unpopulated
         raise ValueError("could not compute standard resources")
 
-    # find the eth values to use for ethernet chips
+    # find the nth values to use for Ethernet chips
     chip = machine.boot_chip
     eth = _Desc(
-        monitors=chip.n_processors - chip.n_user_processors,
+        monitors=chip.n_processors - chip.n_placable_processors,
         router_entries=_int_value(
             chip.router.n_available_multicast_entries),
         sdram=chip.sdram,
@@ -268,13 +265,13 @@ def to_json() -> JsonObject:
         "width": machine.width,
         # Could be removed but need to check all use case
         "root": [0, 0],
-        # Save the standard data to be used as defaults to none ethernet chips
+        # Save the standard data to be used as defaults to none Ethernet chips
         "standardResources": {
             "monitors": std.monitors,
             "routerEntries": std.router_entries,
             "sdram": std.sdram,
             "tags": std.tags},
-        # Save the standard data to be used as defaults to ethernet chips
+        # Save the standard data to be used as defaults to Ethernet chips
         "ethernetResources": {
             "monitors": eth.monitors,
             "routerEntries": eth.router_entries,

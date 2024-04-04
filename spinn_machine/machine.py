@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from __future__ import annotations
+from collections import Counter
 import logging
 from typing import (
     Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple, Union,
@@ -19,12 +20,11 @@ from typing import (
 from typing_extensions import TypeAlias
 from spinn_utilities.abstract_base import AbstractBase, abstractmethod
 from spinn_utilities.typing.coords import XY
-
-from collections import Counter
-from .exceptions import (
-    SpinnMachineAlreadyExistsException, SpinnMachineException)
 from spinn_machine.data import MachineDataView
 from spinn_machine.link_data_objects import FPGALinkData, SpinnakerLinkData
+from .exceptions import (
+    SpinnMachineAlreadyExistsException, SpinnMachineException)
+
 if TYPE_CHECKING:
     from .chip import Chip
 
@@ -70,7 +70,7 @@ class Machine(object, metaclass=AbstractBase):
         # to be used in the str method
         "_origin",
         "_spinnaker_links",
-        # A Counter for sdram on each Chip
+        # A Counter for SDRAM on each Chip
         "_sdram_counter",
         # Declared width of the machine
         # This can not be changed
@@ -507,7 +507,7 @@ class Machine(object, metaclass=AbstractBase):
                     f"A {self.wrap} machine of size {self._width}, "
                     f"{self._height} can not handle multiple ethernet chips")
         # The fact that self._boot_ethernet_address is set means there is an
-        # ethernet chip and it is at 0,0 so no need to check that
+        # Ethernet chip and it is at 0,0 so no need to check that
 
         version = MachineDataView.get_machine_version()
         for chip in self.chips:
@@ -566,12 +566,11 @@ class Machine(object, metaclass=AbstractBase):
         :raise SpinnMachineAlreadyExistsException:
             If a chip with the same x and y coordinates already exists
         """
-        chip_id = (chip.x, chip.y)
-        if chip_id in self._chips:
+        if chip in self._chips:
             raise SpinnMachineAlreadyExistsException(
                 "chip", f"{chip.x}, {chip.y}")
 
-        self._chips[chip_id] = chip
+        self._chips[chip] = chip
 
         # keep some stats about the
         self._n_cores_counter[chip.n_processors] += 1
@@ -582,7 +581,7 @@ class Machine(object, metaclass=AbstractBase):
 
         if chip.ip_address is not None:
             self._ethernet_connected_chips.append(chip)
-            if (chip.x == 0) and (chip.y == 0):
+            if (chip == (0, 0)):
                 self._boot_ethernet_address = chip.ip_address
 
     def add_chips(self, chips: Iterable[Chip]):
@@ -904,18 +903,12 @@ class Machine(object, metaclass=AbstractBase):
                 #
 
                 # handle the first chip
-                ex = ethernet_connected_chip.x
-                ey = ethernet_connected_chip.y
+                (ex, ey) = ethernet_connected_chip
                 ip = ethernet_connected_chip.ip_address
                 assert ip is not None
 
-                # List of x, y, l1, l2, dx, dy where:
-                #     x = start x
-                #     y = start y
-                #     l1 = first link
-                #     l2 = second link
-                #     dx = change in x to next
-                #     dy = change in y to next
+                # List of start x, start y, first link, second link,
+                # change in x to next, change in y to next
                 chip_links = [(7, 3, 0, 5, -1, -1),  # Bottom Right
                               (4, 0, 4, 5, -1, 0),   # Bottom
                               (0, 0, 4, 3, 0, 1),    # Left
@@ -1089,7 +1082,7 @@ class Machine(object, metaclass=AbstractBase):
 
         :rtype: int
         """
-        return sum(chip.n_user_processors for chip in self.chips)
+        return sum(chip.n_placable_processors for chip in self.chips)
 
     @property
     def total_cores(self) -> int:
@@ -1098,8 +1091,7 @@ class Machine(object, metaclass=AbstractBase):
 
         :rtype: int
         """
-        return sum(
-            1 for chip in self.chips for _processor in chip.processors)
+        return sum(chip.n_processors for chip in self.chips)
 
     def unreachable_outgoing_chips(self) -> List[XY]:
         """
@@ -1159,7 +1151,7 @@ class Machine(object, metaclass=AbstractBase):
         for chip in self._chips.values():
             # If no links out of the chip work, remove it
             moves = [(1, 0), (1, 1), (0, 1), (-1, 0), (-1, -1), (0, -1)]
-            x, y = chip.x, chip.y
+            x, y = chip
             nearest_ethernet_x = chip.nearest_ethernet_x
             nearest_ethernet_y = chip.nearest_ethernet_y
             for link, (x_move, y_move) in enumerate(moves):
@@ -1189,7 +1181,7 @@ class Machine(object, metaclass=AbstractBase):
         """
         removable_coords: List[XY] = list()
         for chip in self._chips.values():
-            x, y = chip.x, chip.y
+            x, y = chip
             nearest_ethernet_x = chip.nearest_ethernet_x
             nearest_ethernet_y = chip.nearest_ethernet_y
             # Go through all the chips that surround this one
@@ -1224,7 +1216,7 @@ class Machine(object, metaclass=AbstractBase):
     @staticmethod
     def _minimize_vector(x: int, y: int) -> Tuple[int, int, int]:
         """
-        Minimizes an (x, y, 0) vector.
+        Minimises an (x, y, 0) vector.
 
         When vectors are minimised, (1,1,1) is added or subtracted from them.
         This process does not change the range of numbers in the vector.
@@ -1293,11 +1285,11 @@ class Machine(object, metaclass=AbstractBase):
         :return: an unused (x,y) coordinate
         :rtype: (int, int)
         """
-        # get a set of xys that could be connected to any existing ethernet
+        # get a set of xys that could be connected to any existing Ethernet
         xys_by_ethernet: Set[XY] = set()
-        for ethernet in self.ethernet_connected_chips:
-            xys_by_ethernet.update(
-                self.get_xys_by_ethernet(ethernet.x, ethernet.y))
+        for ethernet_x, ethernet_y in self.ethernet_connected_chips:
+            xys_by_ethernet.update(self.get_xys_by_ethernet(
+                ethernet_x, ethernet_y))
         x = 0
         while (True):
             for y in range(self.height):

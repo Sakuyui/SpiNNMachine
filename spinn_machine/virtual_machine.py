@@ -18,31 +18,28 @@ from typing import Dict, List, Optional, Set, Tuple
 from spinn_utilities.config_holder import get_config_str_or_none
 from spinn_utilities.log import FormatAdapter
 from spinn_utilities.typing.coords import XY
+from spinn_machine.data import MachineDataView
+from spinn_machine.ignores import IgnoreChip, IgnoreCore, IgnoreLink
 from .chip import Chip
 from .router import Router
 from .link import Link
 from .machine import Machine
-from spinn_machine.data import MachineDataView
-from spinn_machine.ignores import IgnoreChip, IgnoreCore, IgnoreLink
 
 logger = FormatAdapter(logging.getLogger(__name__))
 
 
 def virtual_machine(
-        width: int, height: int, n_cpus_per_chip: Optional[int] = None,
-        validate: bool = True):
+        width: int, height: int, validate: bool = True):
     """
     Create a virtual SpiNNaker machine, used for planning execution.
 
     :param int width: the width of the virtual machine in chips
     :param int height: the height of the virtual machine in chips
-    :param int n_cpus_per_chip: The number of CPUs to put on each chip
     :param bool validate: if True will call the machine validate function
     :returns: a virtual machine (that cannot execute code)
     :rtype: ~spinn_machine.Machine
     """
-
-    factory = _VirtualMachine(width, height, n_cpus_per_chip, validate)
+    factory = _VirtualMachine(width, height, validate)
     return factory.machine
 
 
@@ -67,9 +64,10 @@ class _VirtualMachine(object):
     ORIGIN = "Virtual"
 
     def __init__(
-            self, width: int, height: int,
-            n_cpus_per_chip: Optional[int] = None, validate: bool = True):
+            self, width: int, height: int, validate: bool = True):
         version = MachineDataView.get_machine_version()
+        version.verify_size(height, width)
+        max_cores = version.max_cores_per_chip
         self._n_router_entries = version.n_router_entries
         self._machine = version.create_machine(
             width, height, origin=self.ORIGIN)
@@ -104,17 +102,11 @@ class _VirtualMachine(object):
         # If there are no wrap arounds, and the the size is not 2 * 2,
         # the possible chips depend on the 48 chip board's gaps
         configured_chips: Dict[XY, Tuple[XY, int]] = dict()
-        if n_cpus_per_chip is None:
-            for eth in ethernet_chips:
-                for (xy, n_cores) in self._machine.get_xy_cores_by_ethernet(
-                        *eth):
-                    if xy not in unused_chips:
-                        configured_chips[xy] = (eth, n_cores)
-        else:
-            for eth in ethernet_chips:
-                for xy in self._machine.get_xys_by_ethernet(*eth):
-                    if xy not in unused_chips:
-                        configured_chips[xy] = (eth, n_cpus_per_chip)
+        for eth in ethernet_chips:
+            for (xy, n_cores) in self._machine.get_xy_cores_by_ethernet(
+                    *eth):
+                if xy not in unused_chips:
+                    configured_chips[xy] = (eth, min(n_cores, max_cores))
 
         # for chip in self._unreachable_outgoing_chips:
         #    configured_chips.remove(chip)
@@ -137,6 +129,11 @@ class _VirtualMachine(object):
 
     @property
     def machine(self) -> Machine:
+        """
+        The Machine object created by this Factory
+
+        :rtype: Machine
+        """
         return self._machine
 
     def _create_chip(self, xy: XY, configured_chips: Dict[XY, Tuple[XY, int]],
